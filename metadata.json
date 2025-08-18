@@ -1,0 +1,5 @@
+{
+  "name": "V1 CUA: AI Orchestration Engine",
+  "description": "An advanced interface to manage, orchestrate, and interact with a family of AI agents. Features direct chat, chained command execution, and a simulated agent-to-agent command line interface.",
+  "requestFramePermissions": []
+}
