@@ -109,49 +109,88 @@ const App: React.FC = () => {
     
     const applyInlineFormatting = (text: string): string => {
         let formatted = text;
-        // Process bold first to avoid conflict with italics
         formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-        // Process italics
         formatted = formatted.replace(/\*(.*?)\*/g, '<em>$1</em>');
-        // Process inline code
-        formatted = formatted.replace(/`([^`]+)`/g, '<code class="font-mono bg-gray-800 px-1 py-0.5 rounded text-sm text-yellow-300">$1</code>');
+        formatted = formatted.replace(/`([^`]+)`/g, '<code>$1</code>');
         return formatted;
     };
 
     const parseMarkdown = (text: string): string => {
-        // Split the text into blocks separated by one or more blank lines
-        const blocks = text.split(/\n\s*\n/).filter(block => block.trim() !== '');
+        const lines = text.split('\n');
+        let html = '';
+        let listType: 'ul' | 'ol' | null = null;
+        let inCodeBlock = false;
+        let paragraphBuffer: string[] = [];
 
-        const htmlBlocks = blocks.map(block => {
-            // Re-trim after split
-            block = block.trim();
+        const flushParagraph = () => {
+            if (paragraphBuffer.length > 0) {
+                html += `<p>${applyInlineFormatting(paragraphBuffer.join('<br />'))}</p>`;
+                paragraphBuffer = [];
+            }
+        };
 
-            // 1. Handle multi-line code blocks
-            if (block.startsWith('```') && block.endsWith('```')) {
-                // Slice off the backticks and trim any leading/trailing whitespace.
-                const code = block.slice(3, -3).trim();
-                // Basic HTML entity encoding for safety inside the code tag.
-                const safeCode = code.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                return `<pre class="bg-gray-800 p-3 rounded-md my-2 overflow-x-auto"><code class="font-mono text-sm">${safeCode}</code></pre>`;
+        const flushList = () => {
+            if (listType) {
+                html += `</${listType}></blockquote>`;
+                listType = null;
+            }
+        };
+
+        for (const line of lines) {
+            if (line.trim().startsWith('```')) {
+                flushParagraph();
+                flushList();
+                if (inCodeBlock) {
+                    html += '</code></pre>';
+                    inCodeBlock = false;
+                } else {
+                    html += '<pre><code>';
+                    inCodeBlock = true;
+                }
+                continue;
             }
 
-            // 2. Handle lists (which are now inside blockquotes per request)
-            if (block.startsWith('* ') || block.startsWith('- ')) {
-                const items = block.split('\n').map(line => {
-                    // Get content after '* ' or '- '
-                    const itemContent = line.substring(2).trim();
-                    return `<li>${applyInlineFormatting(itemContent)}</li>`;
-                }).join('');
-                return `<blockquote><ul>${items}</ul></blockquote>`;
+            if (inCodeBlock) {
+                html += line.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '\n';
+                continue;
             }
+            
+            const trimmedLine = line.trim();
+            const ulMatch = trimmedLine.match(/^(?:[-*+]\s)(.*)/);
+            const olMatch = trimmedLine.match(/^(\d+\.\s)(.*)/);
 
-            // 3. Handle paragraphs
-            // Apply inline formatting and convert single newlines within a paragraph to <br>
-            let paragraph = applyInlineFormatting(block).replace(/\n/g, '<br />');
-            return `<p>${paragraph}</p>`;
-        });
+            if (ulMatch) {
+                flushParagraph();
+                if (listType !== 'ul') {
+                    flushList();
+                    listType = 'ul';
+                    html += '<blockquote><ul>';
+                }
+                html += `<li>${applyInlineFormatting(ulMatch[1])}</li>`;
+            } else if (olMatch) {
+                flushParagraph();
+                if (listType !== 'ol') {
+                    flushList();
+                    listType = 'ol';
+                    html += '<blockquote><ol>';
+                }
+                html += `<li>${applyInlineFormatting(olMatch[2])}</li>`;
+            } else if (trimmedLine === '') {
+                flushParagraph();
+                flushList();
+            } else {
+                flushList();
+                paragraphBuffer.push(line);
+            }
+        }
 
-        return htmlBlocks.join('');
+        flushParagraph();
+        flushList();
+        if (inCodeBlock) { // Close unclosed code block
+             html += '</code></pre>';
+        }
+
+        return html;
     };
 
     const ChatMessageDisplay: React.FC<{ msg: ChatMessage }> = ({ msg }) => {
@@ -175,8 +214,8 @@ const App: React.FC = () => {
                         <span className="text-sm font-bold">{selectedAgent?.name.charAt(0)}</span>
                     </div>
                 )}
-                <div className={`rounded-lg p-3 max-w-xl text-white glass glass-subtle ${isModel ? '' : 'bg-indigo-900/30'}`}>
-                    <div dangerouslySetInnerHTML={{ __html: parseMarkdown(msg.content) }} />
+                <div className={`rounded-lg p-3 max-w-xl text-white glass ${isModel ? '' : 'bg-indigo-900/30'}`}>
+                    <div className="prose-like" dangerouslySetInnerHTML={{ __html: parseMarkdown(msg.content) }} />
                 </div>
                 {isModel && (
                     <div className="flex flex-col gap-2 pt-1">
@@ -206,7 +245,7 @@ const App: React.FC = () => {
             <div className="mt-6">
                 <div ref={chatLogRef} className="h-[500px] overflow-y-auto space-y-4 mb-4 pr-4">
                     {chatHistory.map(msg => <ChatMessageDisplay key={msg.timestamp} msg={msg} />)}
-                    {isTyping && <div className="flex justify-start"><div className="glass glass-subtle rounded-lg p-3 typing-indicator"><span></span><span></span><span></span></div></div>}
+                    {isTyping && <div className="flex justify-start"><div className="glass rounded-lg p-3 typing-indicator"><span></span><span></span><span></span></div></div>}
                 </div>
                 <form onSubmit={onSend} className="flex gap-2">
                     <input type="text" value={input} onChange={e => setInput(e.target.value)} className="flex-grow bg-gray-900/40 backdrop-blur-sm border border-gray-500/50 rounded-lg p-3 text-white" placeholder="Ask a follow-up..." required autoComplete="off" />
